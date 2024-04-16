@@ -1,6 +1,6 @@
 language: go
 go:
-  - 1.13.1
+  - 1.21.1
   - tip
 matrix:
   allow_failures:
@@ -8,7 +8,7 @@ matrix:
 
 notifications:
   email:
-    recipients: dean.karn@gmail.com
+    recipients: moisespsena@gmail.com
     on_success: change
     on_failure: always
 

@@ -1,24 +1,24 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/go-playground/locales"
-
-	"golang.org/x/text/unicode/cldr"
-
 	"text/template"
+
+	"github.com/moisespsena-go/locales"
+	"golang.org/x/text/unicode/cldr"
 )
 
 const (
-	locDir      = "../%s"
+	locDir      = "../named/%s"
 	locFilename = locDir + "/%s.go"
 )
 
@@ -45,6 +45,9 @@ var (
 
 			return strconv.Itoa(count)
 		},
+		"printf": func(f string, args ...interface{}) string {
+			return fmt.Sprintf(f, args...)
+		},
 	}
 	prVarFuncs = map[string]string{
 		"n": "n := math.Abs(num)\n",
@@ -53,8 +56,12 @@ var (
 		"w": "w := locales.W(n, v)\n",
 		"f": "f := locales.F(n, v)\n",
 		"t": "t := locales.T(n, v)\n",
+		// deprecated by "c"
+		"e": "e := int64(0)\n\n\tif !math.IsNaN(n) && !math.IsInf(n, 0) {\n\t\te = int64(math.Log10(n))\n\t}\n\n",
+		"c": "c := int64(0)\n\n\tif !math.IsNaN(n) && !math.IsInf(n, 0) {\n\t\tc = int64(math.Log10(n))\n\t}\n\n",
 	}
 
+	sortedTranslators      []string
 	translators            = make(map[string]*translator)
 	baseTranslators        = make(map[string]*translator)
 	globalCurrenciesMap    = make(map[string]struct{}) // ["USD"] = "$" currency code, just all currencies for mapping to enum
@@ -73,7 +80,7 @@ var (
 	requiredDecimalRegex   = regexp.MustCompile("\\.([0-9]+)")
 
 	enInheritance = map[string]string{
-		"en_150": "en_001", "en_AG": "en_001", "en_AI": "en_001", "en_AU": "en_001", "en_BB": "en_001", "en_BE": "en_001", "en_BM": "en_001", "en_BS": "en_001", "en_BW": "en_001", "en_BZ": "en_001", "en_CA": "en_001", "en_CC": "en_001", "en_CK": "en_001", "en_CM": "en_001", "en_CX": "en_001", "en_CY": "en_001", "en_DG": "en_001", "en_DM": "en_001", "en_ER": "en_001", "en_FJ": "en_001", "en_FK": "en_001", "en_FM": "en_001", "en_GB": "en_001", "en_GD": "en_001", "en_GG": "en_001", "en_GH": "en_001", "en_GI": "en_001", "en_GM": "en_001", "en_GY": "en_001", "en_HK": "en_001", "en_IE": "en_001", "en_IL": "en_001", "en_IM": "en_001", "en_IN": "en_001", "en_IO": "en_001", "en_JE": "en_001", "en_JM": "en_001", "en_KE": "en_001", "en_KI": "en_001", "en_KN": "en_001", "en_KY": "en_001", "en_LC": "en_001", "en_LR": "en_001", "en_LS": "en_001", "en_MG": "en_001", "en_MO": "en_001", "en_MS": "en_001", "en_MT": "en_001", "en_MU": "en_001", "en_MW": "en_001", "en_MY": "en_001", "en_NA": "en_001", "en_NF": "en_001", "en_NG": "en_001", "en_NR": "en_001", "en_NU": "en_001", "en_NZ": "en_001", "en_PG": "en_001", "en_PH": "en_001", "en_PK": "en_001", "en_PN": "en_001", "en_PW": "en_001", "en_RW": "en_001", "en_SB": "en_001", "en_SC": "en_001", "en_SD": "en_001", "en_SG": "en_001", "en_SH": "en_001", "en_SL": "en_001", "en_SS": "en_001", "en_SX": "en_001", "en_SZ": "en_001", "en_TC": "en_001", "en_TK": "en_001", "en_TO": "en_001", "en_TT": "en_001", "en_TV": "en_001", "en_TZ": "en_001", "en_UG": "en_001", "en_VC": "en_001", "en_VG": "en_001", "en_VU": "en_001", "en_WS": "en_001", "en_ZA": "en_001", "en_ZM": "en_001", "en_ZW": "en_001", }
+		"en_150": "en_001", "en_AG": "en_001", "en_AI": "en_001", "en_AU": "en_001", "en_BB": "en_001", "en_BE": "en_001", "en_BM": "en_001", "en_BS": "en_001", "en_BW": "en_001", "en_BZ": "en_001", "en_CA": "en_001", "en_CC": "en_001", "en_CK": "en_001", "en_CM": "en_001", "en_CX": "en_001", "en_CY": "en_001", "en_DG": "en_001", "en_DM": "en_001", "en_ER": "en_001", "en_FJ": "en_001", "en_FK": "en_001", "en_FM": "en_001", "en_GB": "en_001", "en_GD": "en_001", "en_GG": "en_001", "en_GH": "en_001", "en_GI": "en_001", "en_GM": "en_001", "en_GY": "en_001", "en_HK": "en_001", "en_IE": "en_001", "en_IL": "en_001", "en_IM": "en_001", "en_IN": "en_001", "en_IO": "en_001", "en_JE": "en_001", "en_JM": "en_001", "en_KE": "en_001", "en_KI": "en_001", "en_KN": "en_001", "en_KY": "en_001", "en_LC": "en_001", "en_LR": "en_001", "en_LS": "en_001", "en_MG": "en_001", "en_MO": "en_001", "en_MS": "en_001", "en_MT": "en_001", "en_MU": "en_001", "en_MW": "en_001", "en_MY": "en_001", "en_NA": "en_001", "en_NF": "en_001", "en_NG": "en_001", "en_NR": "en_001", "en_NU": "en_001", "en_NZ": "en_001", "en_PG": "en_001", "en_PH": "en_001", "en_PK": "en_001", "en_PN": "en_001", "en_PW": "en_001", "en_RW": "en_001", "en_SB": "en_001", "en_SC": "en_001", "en_SD": "en_001", "en_SG": "en_001", "en_SH": "en_001", "en_SL": "en_001", "en_SS": "en_001", "en_SX": "en_001", "en_SZ": "en_001", "en_TC": "en_001", "en_TK": "en_001", "en_TO": "en_001", "en_TT": "en_001", "en_TV": "en_001", "en_TZ": "en_001", "en_UG": "en_001", "en_VC": "en_001", "en_VG": "en_001", "en_VU": "en_001", "en_WS": "en_001", "en_ZA": "en_001", "en_ZM": "en_001", "en_ZW": "en_001"}
 	en150Inheritance = map[string]string{"en_AT": "en_150", "en_CH": "en_150", "en_DE": "en_150", "en_DK": "en_150", "en_FI": "en_150", "en_NL": "en_150", "en_SE": "en_150", "en_SI": "en_150"}
 	es419Inheritance = map[string]string{
 		"es_AR": "es_419", "es_BO": "es_419", "es_BR": "es_419", "es_BZ": "es_419", "es_CL": "es_419", "es_CO": "es_419", "es_CR": "es_419", "es_CU": "es_419", "es_DO": "es_419", "es_EC": "es_419", "es_GT": "es_419", "es_HN": "es_419", "es_MX": "es_419", "es_NI": "es_419", "es_PA": "es_419", "es_PE": "es_419", "es_PR": "es_419", "es_PY": "es_419", "es_SV": "es_419", "es_US": "es_419", "es_UY": "es_419", "es_VE": "es_419",
@@ -88,27 +95,28 @@ var (
 		"zh_Hant_MO": "zh_Hant_HK",
 	}
 
-	inheritMaps = []map[string]string{ enInheritance, en150Inheritance, es419Inheritance, rootInheritance, ptPtInheritance, zhHantHKInheritance}
+	inheritMaps = []map[string]string{enInheritance, en150Inheritance, es419Inheritance, rootInheritance, ptPtInheritance, zhHantHKInheritance}
 )
 
 type translator struct {
 	Locale     string
 	BaseLocale string
 	// InheritedLocale string
-	Plurals        string
-	CardinalFunc   string
-	PluralsOrdinal string
-	OrdinalFunc    string
-	PluralsRange   string
-	RangeFunc      string
-	Decimal        string
-	Group          string
-	Minus          string
-	Percent        string
-	PerMille       string
-	TimeSeparator  string
-	Infinity       string
-	Currencies     string
+	Plurals         string
+	CardinalFunc    string
+	PluralsOrdinal  string
+	OrdinalFunc     string
+	PluralsRange    string
+	RangeFunc       string
+	Decimal         string
+	Group           string
+	Minus           string
+	Percent         string
+	PerMille        string
+	TimeSeparator   string
+	Infinity        string
+	Currencies      string
+	CurrencySymbols string
 
 	// FmtNumber vars
 	FmtNumberExists            bool
@@ -127,19 +135,7 @@ type translator struct {
 	FmtPercentLeft              bool
 
 	// FmtCurrency vars
-	FmtCurrencyExists            bool
-	FmtCurrencyGroupLen          int
-	FmtCurrencySecondaryGroupLen int
-	FmtCurrencyMinDecimalLen     int
-	FmtCurrencyPrefix            string
-	FmtCurrencySuffix            string
-	FmtCurrencyInPrefix          bool
-	FmtCurrencyLeft              bool
-	FmtCurrencyNegativeExists    bool
-	FmtCurrencyNegativePrefix    string
-	FmtCurrencyNegativeSuffix    string
-	FmtCurrencyNegativeInPrefix  bool
-	FmtCurrencyNegativeLeft      bool
+	CurrencyFormatters string
 
 	// Date & Time
 	FmtCalendarExists bool
@@ -164,23 +160,42 @@ type translator struct {
 
 	FmtTimezones string
 
+	displayListPatterns *locales.ListPatterns
+	DisplayListPatterns string
+
 	// calculation only fields below this point...
-	DecimalNumberFormat          string
-	PercentNumberFormat          string
-	CurrencyNumberFormat         string
-	NegativeCurrencyNumberFormat string
+	DecimalNumberFormat string
+	PercentNumberFormat string
+	currencyFormatters  *locales.CurrencyFormatters
 
 	// Dates
+	DateFullLayout   string
+	DateLongLayout   string
+	DateMediumLayout string
+	DateShortLayout  string
+
 	FmtDateFull   string
 	FmtDateLong   string
 	FmtDateMedium string
 	FmtDateShort  string
 
 	// Times
+	TimeFullLayout   string
+	TimeLongLayout   string
+	TimeMediumLayout string
+	TimeShortLayout  string
+
 	FmtTimeFull   string
 	FmtTimeLong   string
 	FmtTimeMedium string
 	FmtTimeShort  string
+
+	DurationSpec string
+
+	MiscPatternsApproximately,
+	MiscPatternsAtLeast,
+	MiscPatternsAtMost,
+	MiscPatternsRange string
 
 	// timezones per locale by type
 	timezones map[string]*zoneAbbrev // key = type eg. America_Eastern zone Abbrev will be long form eg. Eastern Standard Time, Pacific Standard Time.....
@@ -194,8 +209,15 @@ type zoneAbbrev struct {
 var timezones = map[string]*zoneAbbrev{} // key = type eg. America_Eastern zone Abbrev eg. EST & EDT
 
 func main() {
-
 	var err error
+
+	if _, err := os.Stat(fmt.Sprintf(locDir, ".")); os.IsNotExist(err) {
+		if s, err := os.Stat(filepath.Clean(fmt.Sprintf(locDir, ".."))); err != nil {
+			log.Fatal(err)
+		} else if err = os.Mkdir(filepath.Clean(fmt.Sprintf(locDir, ".")), s.Mode()); err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	// load template
 	tmpl, err = template.New("all").Funcs(tfuncs).ParseGlob("*.tmpl")
@@ -211,20 +233,24 @@ func main() {
 		panic("failed decode CLDR data; " + err.Error())
 	}
 
+	sortedTranslators = cldr.Locales()
+	sort.Strings(sortedTranslators)
+
 	preProcess(cldr)
 	postProcess(cldr)
 
 	var currencies string
 
 	for i, curr := range globalCurrencies {
-
 		if i == 0 {
-			currencies = curr + " Type = iota\n"
+			currencies = curr + " Type = 1 + iota\n"
 			continue
 		}
 
 		currencies += curr + "\n"
 	}
+
+	clean()
 
 	if err = os.MkdirAll(fmt.Sprintf(locDir, "currency"), 0777); err != nil {
 		log.Fatal(err)
@@ -255,7 +281,9 @@ func main() {
 		log.Panic("failed execute \"gofmt\" for file ", filename, ": ", err)
 	}
 
-	for _, trans := range translators {
+	for _, name := range sortedTranslators {
+		trans := translators[name]
+
 		fmt.Println("Writing Data:", trans.Locale)
 
 		if err = os.MkdirAll(fmt.Sprintf(locDir, trans.Locale), 0777); err != nil {
@@ -278,12 +306,14 @@ func main() {
 
 		// after file written run gofmt on file to ensure best formatting
 		cmd := exec.Command("goimports", "-w", filename)
+		cmd.Stderr = os.Stderr
 		if err = cmd.Run(); err != nil {
 			log.Panic("failed execute \"goimports\" for file ", filename, ": ", err)
 		}
 
 		// this simplifies some syntax that I can;t find an option for in goimports, namely '-s'
 		cmd = exec.Command("gofmt", "-s", "-w", filename)
+		cmd.Stderr = os.Stderr
 		if err = cmd.Run(); err != nil {
 			log.Panic("failed execute \"gofmt\" for file ", filename, ": ", err)
 		}
@@ -309,14 +339,44 @@ func main() {
 
 		// after file written run gofmt on file to ensure best formatting
 		cmd = exec.Command("goimports", "-w", filename)
+		cmd.Stderr = os.Stderr
 		if err = cmd.Run(); err != nil {
 			log.Panic("failed execute \"goimports\" for file ", filename, ": ", err)
 		}
 
 		// this simplifies some syntax that I can;t find an option for in goimports, namely '-s'
 		cmd = exec.Command("gofmt", "-s", "-w", filename)
+		cmd.Stderr = os.Stderr
 		if err = cmd.Run(); err != nil {
 			log.Panic("failed execute \"gofmt\" for file ", filename, ": ", err)
+		}
+	}
+}
+
+func clean() {
+	f, err := os.Open(filepath.Dir(locDir))
+	if err != nil {
+		log.Panic(err)
+	}
+	defer f.Close()
+
+	items, err := f.Readdir(0)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	for _, item := range items {
+		if item.IsDir() {
+			name := item.Name()
+			if name[0] == '.' || name == "currency" {
+				continue
+			}
+			pth := fmt.Sprintf(locDir, name)
+			if _, err := os.Stat(filepath.Join(pth, name+".go")); err == nil {
+				if err = os.RemoveAll(pth); err != nil {
+					log.Panic(err)
+				}
+			}
 		}
 	}
 }
@@ -342,14 +402,15 @@ func postProcess(cldr *cldr.CLDR) {
 	var base *translator
 	var inheritedFound, baseFound bool
 
-	for _, trans := range translators {
+	for _, transName := range sortedTranslators {
+		trans := translators[transName]
 
 		fmt.Println("Post Processing:", trans.Locale)
 
 		// cardinal plural rules
 		trans.CardinalFunc, trans.Plurals = parseCardinalPluralRuleFunc(cldr, trans.Locale, trans.BaseLocale)
 
-		//ordinal plural rules
+		// ordinal plural rules
 		trans.OrdinalFunc, trans.PluralsOrdinal = parseOrdinalPluralRuleFunc(cldr, trans.BaseLocale)
 
 		// range plural rules
@@ -363,10 +424,10 @@ func postProcess(cldr *cldr.CLDR) {
 
 			inheritedFound = false
 
-			for _, inheritMap := range(inheritMaps) {
+			for _, inheritMap := range inheritMaps {
 				if inherit, found := inheritMap[trans.Locale]; found {
 					inherited, inheritedFound = translators[inherit]
-					break;
+					break
 				}
 			}
 
@@ -486,88 +547,88 @@ func postProcess(cldr *cldr.CLDR) {
 			trans.PercentNumberFormat = base.PercentNumberFormat
 		}
 
-		if len(trans.CurrencyNumberFormat) == 0 && inheritedFound {
-			trans.CurrencyNumberFormat = inherited.CurrencyNumberFormat
+		if trans.currencyFormatters == nil && inheritedFound {
+			trans.currencyFormatters = inherited.currencyFormatters
 		}
 
-		if len(trans.CurrencyNumberFormat) == 0 && baseFound {
-			trans.CurrencyNumberFormat = base.CurrencyNumberFormat
+		if trans.currencyFormatters == nil && baseFound {
+			trans.currencyFormatters = base.currencyFormatters
 		}
 
-		if len(trans.NegativeCurrencyNumberFormat) == 0 && inheritedFound {
-			trans.NegativeCurrencyNumberFormat = inherited.NegativeCurrencyNumberFormat
+		if trans.displayListPatterns == nil && inheritedFound {
+			trans.displayListPatterns = inherited.displayListPatterns
 		}
 
-		if len(trans.NegativeCurrencyNumberFormat) == 0 && baseFound {
-			trans.NegativeCurrencyNumberFormat = base.NegativeCurrencyNumberFormat
+		if trans.displayListPatterns == nil && baseFound {
+			trans.displayListPatterns = base.displayListPatterns
 		}
 
 		// date values
 
-		if len(trans.FmtDateFull) == 0 && inheritedFound {
-			trans.FmtDateFull = inherited.FmtDateFull
+		if len(trans.DateFullLayout) == 0 && inheritedFound {
+			trans.DateFullLayout = inherited.DateFullLayout
 		}
 
-		if len(trans.FmtDateFull) == 0 && baseFound {
-			trans.FmtDateFull = base.FmtDateFull
+		if len(trans.DateFullLayout) == 0 && baseFound {
+			trans.DateFullLayout = base.DateFullLayout
 		}
 
-		if len(trans.FmtDateLong) == 0 && inheritedFound {
-			trans.FmtDateLong = inherited.FmtDateLong
+		if len(trans.DateLongLayout) == 0 && inheritedFound {
+			trans.DateLongLayout = inherited.DateLongLayout
 		}
 
-		if len(trans.FmtDateLong) == 0 && baseFound {
-			trans.FmtDateLong = base.FmtDateLong
+		if len(trans.DateLongLayout) == 0 && baseFound {
+			trans.DateLongLayout = base.DateLongLayout
 		}
 
-		if len(trans.FmtDateMedium) == 0 && inheritedFound {
-			trans.FmtDateMedium = inherited.FmtDateMedium
+		if len(trans.DateMediumLayout) == 0 && inheritedFound {
+			trans.DateMediumLayout = inherited.DateMediumLayout
 		}
 
-		if len(trans.FmtDateMedium) == 0 && baseFound {
-			trans.FmtDateMedium = base.FmtDateMedium
+		if len(trans.DateMediumLayout) == 0 && baseFound {
+			trans.DateMediumLayout = base.DateMediumLayout
 		}
 
-		if len(trans.FmtDateShort) == 0 && inheritedFound {
-			trans.FmtDateShort = inherited.FmtDateShort
+		if len(trans.DateShortLayout) == 0 && inheritedFound {
+			trans.DateShortLayout = inherited.DateShortLayout
 		}
 
-		if len(trans.FmtDateShort) == 0 && baseFound {
-			trans.FmtDateShort = base.FmtDateShort
+		if len(trans.DateShortLayout) == 0 && baseFound {
+			trans.DateShortLayout = base.DateShortLayout
 		}
 
 		// time values
 
-		if len(trans.FmtTimeFull) == 0 && inheritedFound {
-			trans.FmtTimeFull = inherited.FmtTimeFull
+		if len(trans.TimeFullLayout) == 0 && inheritedFound {
+			trans.TimeFullLayout = inherited.TimeFullLayout
 		}
 
-		if len(trans.FmtTimeFull) == 0 && baseFound {
-			trans.FmtTimeFull = base.FmtTimeFull
+		if len(trans.TimeFullLayout) == 0 && baseFound {
+			trans.TimeFullLayout = base.TimeFullLayout
 		}
 
-		if len(trans.FmtTimeLong) == 0 && inheritedFound {
-			trans.FmtTimeLong = inherited.FmtTimeLong
+		if len(trans.TimeLongLayout) == 0 && inheritedFound {
+			trans.TimeLongLayout = inherited.TimeLongLayout
 		}
 
-		if len(trans.FmtTimeLong) == 0 && baseFound {
-			trans.FmtTimeLong = base.FmtTimeLong
+		if len(trans.TimeLongLayout) == 0 && baseFound {
+			trans.TimeLongLayout = base.TimeLongLayout
 		}
 
-		if len(trans.FmtTimeMedium) == 0 && inheritedFound {
-			trans.FmtTimeMedium = inherited.FmtTimeMedium
+		if len(trans.TimeMediumLayout) == 0 && inheritedFound {
+			trans.TimeMediumLayout = inherited.TimeMediumLayout
 		}
 
-		if len(trans.FmtTimeMedium) == 0 && baseFound {
-			trans.FmtTimeMedium = base.FmtTimeMedium
+		if len(trans.TimeMediumLayout) == 0 && baseFound {
+			trans.TimeMediumLayout = base.TimeMediumLayout
 		}
 
-		if len(trans.FmtTimeShort) == 0 && inheritedFound {
-			trans.FmtTimeShort = inherited.FmtTimeShort
+		if len(trans.TimeShortLayout) == 0 && inheritedFound {
+			trans.TimeShortLayout = inherited.TimeShortLayout
 		}
 
-		if len(trans.FmtTimeShort) == 0 && baseFound {
-			trans.FmtTimeShort = base.FmtTimeShort
+		if len(trans.TimeShortLayout) == 0 && baseFound {
+			trans.TimeShortLayout = base.TimeShortLayout
 		}
 
 		// month values
@@ -690,20 +751,96 @@ func postProcess(cldr *cldr.CLDR) {
 			trans.FmtErasWide = base.FmtErasWide
 		}
 
+		if trans.MiscPatternsApproximately == "" && inheritedFound {
+			trans.MiscPatternsApproximately = inherited.MiscPatternsApproximately
+			trans.MiscPatternsAtLeast = inherited.MiscPatternsAtLeast
+			trans.MiscPatternsAtMost = inherited.MiscPatternsAtMost
+			trans.MiscPatternsRange = inherited.MiscPatternsRange
+		}
+
+		if trans.MiscPatternsApproximately == "" && baseFound {
+			trans.MiscPatternsApproximately = base.MiscPatternsApproximately
+			trans.MiscPatternsAtLeast = base.MiscPatternsAtLeast
+			trans.MiscPatternsAtMost = base.MiscPatternsAtMost
+			trans.MiscPatternsRange = base.MiscPatternsRange
+		}
+
 		ldml := cldr.RawLDML(trans.Locale)
 
-		currencies := make([]string, len(globalCurrencies), len(globalCurrencies))
+		if ldml.ListPatterns != nil {
+			var (
+				std, or struct{ two, start, middle, end string }
+				orI     = -1
+			)
 
-		var kval string
+			for i, p := range ldml.ListPatterns.ListPattern {
+				if p.Type == "or" {
+					orI = i
+					continue
+				}
+				if strings.Contains(p.Type, "unit") {
+					continue
+				}
+
+				for _, p := range p.ListPatternPart {
+					switch p.Type {
+					case "2":
+						if std.two == "" {
+							std.two = p.Data()
+						}
+					case "start":
+						if std.start == "" {
+							std.start = p.Data()
+						}
+					case "middle":
+						if std.middle == "" {
+							std.middle = p.Data()
+						}
+					case "end":
+						if std.end == "" {
+							std.end = p.Data()
+						}
+					}
+				}
+			}
+
+			p := &locales.ListPatterns{
+				AndP: locales.NewListPattern(std.two, std.start, std.middle, std.end),
+			}
+
+			if orI >= 0 {
+				or = std
+				for _, p := range ldml.ListPatterns.ListPattern[orI].ListPatternPart {
+					switch p.Type {
+					case "2":
+						or.two = p.Data()
+					case "start":
+						or.start = p.Data()
+					case "middle":
+						or.middle = p.Data()
+					case "end":
+						or.end = p.Data()
+					}
+				}
+
+				p.OrP = locales.NewListPattern(or.two, or.start, or.middle, or.end)
+			}
+
+			trans.displayListPatterns = p
+		}
+
+		var hasCurrencies bool
+		currencies := make([]locales.Currency, len(globalCurrencies), len(globalCurrencies))
 
 		for k, v := range globCurrencyIdxMap {
-
-			kval = k
-			// if kval[:len(kval)-1] != " " {
-			// 	kval += " "
-			// }
-
-			currencies[v] = kval
+			currencies[v] = locales.Currency{
+				Names: map[locales.PluralRule]string{
+					locales.PluralRuleUnknown: k,
+				},
+				Symbols: locales.CurrencySymbols{
+					Default: k,
+				},
+			}
 		}
 
 		// some just have no data...
@@ -723,13 +860,27 @@ func postProcess(cldr *cldr.CLDR) {
 					if len(currency.Type) == 0 {
 						continue
 					}
+					hasCurrencies = true
 
-					currencies[globCurrencyIdxMap[currency.Type]] = currency.Symbol[0].Data()
+					for _, symbol := range currency.Symbol {
+						cur := &currencies[globCurrencyIdxMap[currency.Type]]
+						data := symbol.Data()
+						switch symbol.Alt {
+						case "":
+							cur.Symbols.Default = data
+						case "narrow":
+							cur.Symbols.Narrow = data
+						}
+					}
 				}
 			}
 		}
 
-		trans.Currencies = fmt.Sprintf("%#v", currencies)
+		if !hasCurrencies && baseFound {
+			trans.Currencies = base.Currencies
+		} else {
+			trans.Currencies = fmt.Sprintf("%#v", currencies)
+		}
 
 		// timezones
 
@@ -756,6 +907,12 @@ func postProcess(cldr *cldr.CLDR) {
 			}
 		}
 
+		if trans.displayListPatterns != nil {
+			trans.DisplayListPatterns = fmt.Sprintf("%#v", trans.displayListPatterns.ToSlice())
+		} else {
+			trans.DisplayListPatterns = "nil"
+		}
+
 		// make sure all base timezones are part of sub locale timezones
 		if baseFound {
 
@@ -778,7 +935,8 @@ func postProcess(cldr *cldr.CLDR) {
 		parseCurrencyNumberFormat(trans)
 	}
 
-	for _, trans := range translators {
+	for _, transName := range sortedTranslators {
+		trans := translators[transName]
 
 		fmt.Println("Final Processing:", trans.Locale)
 
@@ -807,16 +965,14 @@ func postProcess(cldr *cldr.CLDR) {
 			trans.TimeSeparator = ":"
 		}
 
-		trans.FmtDateShort, trans.FmtDateMedium, trans.FmtDateLong, trans.FmtDateFull = parseDateFormats(trans, trans.FmtDateShort, trans.FmtDateMedium, trans.FmtDateLong, trans.FmtDateFull)
-		trans.FmtTimeShort, trans.FmtTimeMedium, trans.FmtTimeLong, trans.FmtTimeFull = parseDateFormats(trans, trans.FmtTimeShort, trans.FmtTimeMedium, trans.FmtTimeLong, trans.FmtTimeFull)
+		trans.FmtDateShort, trans.FmtDateMedium, trans.FmtDateLong, trans.FmtDateFull = parseDateFormats(trans, "dateShortLayout", "dateMediumLayout", "dateLongLayout", "dateFullLayout")
+		trans.FmtTimeShort, trans.FmtTimeMedium, trans.FmtTimeLong, trans.FmtTimeFull = parseDateFormats(trans, "timeShortLayout", "timeMediumLayout", "timeLongLayout", "timeFullLayout")
 	}
 }
 
 // preprocesses maps, array etc... just requires multiple passes no choice....
 func preProcess(cldrVar *cldr.CLDR) {
-
-	for _, l := range cldrVar.Locales() {
-
+	for _, l := range sortedTranslators {
 		fmt.Println("Pre Processing:", l)
 
 		split := strings.SplitN(l, "_", 2)
@@ -885,20 +1041,16 @@ func preProcess(cldrVar *cldr.CLDR) {
 				if len(symbol.PerMille) > 0 {
 					trans.PerMille = symbol.PerMille[0].Data()
 				}
-
 				if len(symbol.TimeSeparator) > 0 {
 					trans.TimeSeparator = symbol.TimeSeparator[0].Data()
 				}
-
 				if len(symbol.Infinity) > 0 {
 					trans.Infinity = symbol.Infinity[0].Data()
 				}
 			}
 
 			if ldml.Numbers.Currencies != nil {
-
 				for _, currency := range ldml.Numbers.Currencies.Currency {
-
 					if len(strings.TrimSpace(currency.Type)) == 0 {
 						continue
 					}
@@ -908,7 +1060,6 @@ func preProcess(cldrVar *cldr.CLDR) {
 			}
 
 			if len(ldml.Numbers.DecimalFormats) > 0 && len(ldml.Numbers.DecimalFormats[0].DecimalFormatLength) > 0 {
-
 				for _, dfl := range ldml.Numbers.DecimalFormats[0].DecimalFormatLength {
 					if len(dfl.Type) == 0 {
 						trans.DecimalNumberFormat = dfl.DecimalFormat[0].Pattern[0].Data()
@@ -918,7 +1069,6 @@ func preProcess(cldrVar *cldr.CLDR) {
 			}
 
 			if len(ldml.Numbers.PercentFormats) > 0 && len(ldml.Numbers.PercentFormats[0].PercentFormatLength) > 0 {
-
 				for _, dfl := range ldml.Numbers.PercentFormats[0].PercentFormatLength {
 					if len(dfl.Type) == 0 {
 						trans.PercentNumberFormat = dfl.PercentFormat[0].Pattern[0].Data()
@@ -927,24 +1077,165 @@ func preProcess(cldrVar *cldr.CLDR) {
 				}
 			}
 
+			var formatters locales.CurrencyFormatters
+
 			if len(ldml.Numbers.CurrencyFormats) > 0 && len(ldml.Numbers.CurrencyFormats[0].CurrencyFormatLength) > 0 {
+				for _, cfl := range ldml.Numbers.CurrencyFormats[0].CurrencyFormatLength {
+					if cfl.Type == "short" {
+						if len(cfl.CurrencyFormat) > 0 {
+							formatters.Short = locales.CurrencyAccountingFormatterByExp{
+								CurrencyFmt:   map[uint8]*locales.CurrencyAccountingFormatterByExpPlural{},
+								AccountingFmt: map[uint8]*locales.CurrencyAccountingFormatterByExpPlural{},
+							}
 
-				if len(ldml.Numbers.CurrencyFormats[0].CurrencyFormatLength[0].CurrencyFormat) > 1 {
+							for _, curFmt := range cfl.CurrencyFormat {
+								for _, pattern := range curFmt.Pattern {
+									var (
+										exp  = len(strings.TrimPrefix(pattern.Type, "1"))
+										rule = locales.PluralRuleOther
+										s    = strings.ReplaceAll(pattern.Data(), string('\u00A0'), " ")
+									)
+									switch pattern.Count {
+									case "one":
+										rule = locales.PluralRuleOne
+									}
 
-					split := strings.SplitN(ldml.Numbers.CurrencyFormats[0].CurrencyFormatLength[0].CurrencyFormat[1].Pattern[0].Data(), ";", 2)
-
-					trans.CurrencyNumberFormat = split[0]
-
-					if len(split) > 1 && len(split[1]) > 0 {
-						trans.NegativeCurrencyNumberFormat = split[1]
-					} else {
-						trans.NegativeCurrencyNumberFormat = trans.CurrencyNumberFormat
+									switch curFmt.Type {
+									case "standard":
+										p := locales.MustParseNumberFormatPatterns(s)
+										if v := formatters.Short.CurrencyFmt[uint8(exp)]; v == nil {
+											formatters.Short.CurrencyFmt[uint8(exp)] = &locales.CurrencyAccountingFormatterByExpPlural{
+												Rules: map[locales.PluralRule]*locales.NumberFormatProperties{
+													rule: p,
+												}}
+										} else {
+											formatters.Short.CurrencyFmt[uint8(exp)].Rules[rule] = p
+										}
+									case "accounting":
+										p := locales.MustParseNumberFormatPatterns(s + "÷" + strconv.FormatUint(uint64(exp), 10))
+										if v := formatters.Short.AccountingFmt[uint8(exp)]; v == nil {
+											formatters.Short.AccountingFmt[uint8(exp)] = &locales.CurrencyAccountingFormatterByExpPlural{
+												Rules: map[locales.PluralRule]*locales.NumberFormatProperties{
+													rule: p,
+												}}
+										} else {
+											formatters.Short.AccountingFmt[uint8(exp)].Rules[rule] = p
+										}
+									}
+								}
+							}
+						}
+					} else if len(cfl.CurrencyFormat) > 1 {
+						for _, curFmt := range cfl.CurrencyFormat {
+							var s = strings.ReplaceAll(curFmt.Pattern[0].Data(), string('\u00A0'), " ")
+							if curFmt.Type == "accounting" {
+								formatters.AccountingFmt = locales.MustParseNumberFormatPatterns(s)
+							} else {
+								formatters.CurrencyFmt = locales.MustParseNumberFormatPatterns(s)
+							}
+						}
+					} else if formatters.CurrencyFmt == nil {
+						formatters.CurrencyFmt = locales.MustParseNumberFormatPatterns(cfl.CurrencyFormat[0].Pattern[0].Data())
 					}
-				} else {
-					trans.CurrencyNumberFormat = ldml.Numbers.CurrencyFormats[0].CurrencyFormatLength[0].CurrencyFormat[0].Pattern[0].Data()
-					trans.NegativeCurrencyNumberFormat = trans.CurrencyNumberFormat
 				}
 			}
+
+			if !formatters.IsZero() {
+				trans.currencyFormatters = &formatters
+			}
+
+			if len(ldml.Numbers.MiscPatterns) > 0 {
+				for _, p := range ldml.Numbers.MiscPatterns {
+					for _, p := range p.Pattern {
+						v := strings.ReplaceAll(strings.ReplaceAll(p.CharData, "{0}", "%[1]v"), "{1}", "%[2]v")
+						switch p.Type {
+						case "approximately":
+							trans.MiscPatternsApproximately = v
+						case "atLeast":
+							trans.MiscPatternsAtLeast = v
+						case "atMost":
+							trans.MiscPatternsAtMost = v
+						case "range":
+							trans.MiscPatternsRange = v
+						}
+					}
+				}
+			}
+		}
+
+		if ldml.Units != nil {
+
+			var dur locales.DurationSpec
+			dur.Day.Long = &locales.CounterFormat{}
+
+			for _, du := range ldml.Units.UnitLength {
+			units:
+				for _, du2 := range du.Unit {
+					var p *locales.DurationSpecPair
+					switch du2.Type {
+					case "duration-century":
+						p = &dur.Century
+					case "duration-decade":
+						p = &dur.Decade
+					case "duration-year":
+						p = &dur.Year
+					case "duration-month":
+						p = &dur.Month
+					case "duration-week":
+						p = &dur.Week
+					case "duration-day":
+						p = &dur.Day
+					case "duration-hour":
+						p = &dur.Hour
+					case "duration-minute":
+						p = &dur.Minute
+					case "duration-second":
+						p = &dur.Second
+					case "duration-millisecond":
+						p = &dur.Millisecond
+					case "duration-microsecond":
+						p = &dur.Microsecond
+					case "duration-nanosecond":
+						p = &dur.Nanosecond
+					default:
+						continue units
+					}
+
+					var dst = &locales.CounterFormat{}
+
+					if len(du2.DisplayName) == 1 {
+						dst.Label = du2.DisplayName[0].CharData
+					}
+
+					for _, pn := range du2.UnitPattern {
+						switch pn.Count {
+						case "one":
+							dst.One = strings.ReplaceAll(pn.CharData, "{0}", "%v")
+						case "other":
+							dst.Other = strings.ReplaceAll(pn.CharData, "{0}", "%v")
+						}
+					}
+
+					for _, pn := range du2.PerUnitPattern {
+						dst.Per = strings.ReplaceAll(pn.CharData, "{0}", "%v")
+						break
+					}
+
+					if dst.One != "" {
+						if p.Long == nil {
+							p.Long = dst
+						} else {
+							p.Short = dst
+						}
+					}
+				}
+			}
+
+			var buf bytes.Buffer
+			buf.WriteString("&")
+			dur.LongSep = " "
+			dur.Dump("locales.", &buf)
+			trans.DurationSpec = buf.String()
 		}
 
 		if ldml.Dates != nil {
@@ -1022,16 +1313,16 @@ func preProcess(cldrVar *cldr.CLDR) {
 
 							switch datefmt.Type {
 							case "full":
-								trans.FmtDateFull = datefmt.DateFormat[0].Pattern[0].Data()
+								trans.DateFullLayout = datefmt.DateFormat[0].Pattern[0].Data()
 
 							case "long":
-								trans.FmtDateLong = datefmt.DateFormat[0].Pattern[0].Data()
+								trans.DateLongLayout = datefmt.DateFormat[0].Pattern[0].Data()
 
 							case "medium":
-								trans.FmtDateMedium = datefmt.DateFormat[0].Pattern[0].Data()
+								trans.DateMediumLayout = datefmt.DateFormat[0].Pattern[0].Data()
 
 							case "short":
-								trans.FmtDateShort = datefmt.DateFormat[0].Pattern[0].Data()
+								trans.DateShortLayout = datefmt.DateFormat[0].Pattern[0].Data()
 							}
 						}
 					}
@@ -1042,13 +1333,13 @@ func preProcess(cldrVar *cldr.CLDR) {
 
 							switch datefmt.Type {
 							case "full":
-								trans.FmtTimeFull = datefmt.TimeFormat[0].Pattern[0].Data()
+								trans.TimeFullLayout = datefmt.TimeFormat[0].Pattern[0].Data()
 							case "long":
-								trans.FmtTimeLong = datefmt.TimeFormat[0].Pattern[0].Data()
+								trans.TimeLongLayout = datefmt.TimeFormat[0].Pattern[0].Data()
 							case "medium":
-								trans.FmtTimeMedium = datefmt.TimeFormat[0].Pattern[0].Data()
+								trans.TimeMediumLayout = datefmt.TimeFormat[0].Pattern[0].Data()
 							case "short":
-								trans.FmtTimeShort = datefmt.TimeFormat[0].Pattern[0].Data()
+								trans.TimeShortLayout = datefmt.TimeFormat[0].Pattern[0].Data()
 							}
 						}
 					}
@@ -1319,614 +1610,18 @@ func parseDateFormats(trans *translator, shortFormat, mediumFormat, longFormat, 
 }
 
 func parseDateTimeFormat(baseLocale, format string, eraScore uint8) (results string) {
-
-	// rules:
-	// y = four digit year
-	// yy = two digit year
-
-	// var b []byte
-
-	var inConstantText bool
-	var start int
-
-	for i := 0; i < len(format); i++ {
-
-		switch format[i] {
-
-		// time separator
-		case ':':
-
-			if inConstantText {
-				inConstantText = false
-				results += "b = append(b, " + fmt.Sprintf("%#v", []byte(format[start:i])) + "...)\n"
-			}
-
-			results += "b = append(b, " + baseLocale + ".timeSeparator...)\n"
-		case '\'':
-
-			i++
-			startI := i
-
-			// peek to see if ''
-			if len(format) != i && format[i] == '\'' {
-
-				if inConstantText {
-					inConstantText = false
-					results += "b = append(b, " + fmt.Sprintf("%#v", []byte(format[start:i-1])) + "...)\n"
-				} else {
-					inConstantText = true
-					start = i
-				}
-
-				continue
-			}
-
-			// not '' so whatever comes between '' is constant
-
-			if len(format) != i {
-
-				// advance i to the next single quote + 1
-				for ; i < len(format); i++ {
-					if format[i] == '\'' {
-
-						if inConstantText {
-							inConstantText = false
-							b := []byte(format[start : startI-1])
-							b = append(b, []byte(format[startI:i])...)
-
-							results += "b = append(b, " + fmt.Sprintf("%#v", b) + "...)\n"
-
-						} else {
-							results += "b = append(b, " + fmt.Sprintf("%#v", []byte(format[startI:i])) + "...)\n"
-						}
-
-						break
-					}
-				}
-			}
-
-		// 24 hour
-		case 'H':
-
-			if inConstantText {
-				inConstantText = false
-				results += "b = append(b, " + fmt.Sprintf("%#v", []byte(format[start:i])) + "...)\n"
-			}
-
-			// peek
-			// two digit hour required?
-			if len(format) != i+1 && format[i+1] == 'H' {
-				i++
-				results += `
-					if t.Hour() < 10 {
-						b = append(b, '0')
-					}
-
-				`
-			}
-
-			results += "b = strconv.AppendInt(b, int64(t.Hour()), 10)\n"
-
-		// hour
-		case 'h':
-
-			if inConstantText {
-				inConstantText = false
-				results += "b = append(b, " + fmt.Sprintf("%#v", []byte(format[start:i])) + "...)\n"
-			}
-
-			results += `
-				h := t.Hour()
-
-				if h > 12 {
-					h -= 12
-				}
-
-			`
-
-			// peek
-			// two digit hour required?
-			if len(format) != i+1 && format[i+1] == 'h' {
-				i++
-				results += `
-					if h < 10 {
-						b = append(b, '0')
-					}
-
-				`
-			}
-
-			results += "b = strconv.AppendInt(b, int64(h), 10)\n"
-
-		// minute
-		case 'm':
-
-			if inConstantText {
-				inConstantText = false
-				results += "b = append(b, " + fmt.Sprintf("%#v", []byte(format[start:i])) + "...)\n"
-			}
-
-			// peek
-			// two digit minute required?
-			if len(format) != i+1 && format[i+1] == 'm' {
-				i++
-				results += `
-
-					if t.Minute() < 10 {
-						b = append(b, '0')
-					}
-
-				`
-			}
-
-			results += "b = strconv.AppendInt(b, int64(t.Minute()), 10)\n"
-
-		// second
-		case 's':
-
-			if inConstantText {
-				inConstantText = false
-				results += "b = append(b, " + fmt.Sprintf("%#v", []byte(format[start:i])) + "...)\n"
-			}
-
-			// peek
-			// two digit minute required?
-			if len(format) != i+1 && format[i+1] == 's' {
-				i++
-				results += `
-
-					if t.Second() < 10 {
-						b = append(b, '0')
-					}
-
-				`
-			}
-
-			results += "b = strconv.AppendInt(b, int64(t.Second()), 10)\n"
-
-		// day period
-		case 'a':
-
-			if inConstantText {
-				inConstantText = false
-				results += "b = append(b, " + fmt.Sprintf("%#v", []byte(format[start:i])) + "...)\n"
-			}
-
-			// only used with 'h', patterns should not contains 'a' without 'h' so not checking
-
-			// choosing to use abbreviated, didn't see any rules about which should be used with which
-			// date format....
-
-			results += `
-
-				if t.Hour() < 12 {
-					b = append(b, ` + baseLocale + `.periodsAbbreviated[0]...)
-				} else {
-					b = append(b, ` + baseLocale + `.periodsAbbreviated[1]...)
-				}
-
-			`
-
-		// timezone
-		case 'z', 'v':
-
-			if inConstantText {
-				inConstantText = false
-				results += "b = append(b, " + fmt.Sprintf("%#v", []byte(format[start:i])) + "...)\n"
-			}
-
-			// consume multiple, only handling Abbrev tz from time.Time for the moment...
-
-			var count int
-
-			if format[i] == 'z' {
-				for j := i; j < len(format); j++ {
-					if format[j] == 'z' {
-						count++
-					} else {
-						break
-					}
-				}
-			}
-
-			if format[i] == 'v' {
-				for j := i; j < len(format); j++ {
-					if format[j] == 'v' {
-						count++
-					} else {
-						break
-					}
-				}
-			}
-
-			i += count - 1
-
-			// using the timezone on the Go time object, eg. EST, EDT, MST.....
-
-			if count < 4 {
-
-				results += `
-
-					tz, _ := t.Zone()
-					b = append(b, tz...)
-
-				`
-			} else {
-
-				results += `
-					tz, _ := t.Zone()
-
-					if btz, ok := ` + baseLocale + `.timezones[tz]; ok {
-						b = append(b, btz...)
-					} else {
-						b = append(b, tz...)
-					}
-
-				`
-			}
-
-		// day
-		case 'd':
-
-			if inConstantText {
-				inConstantText = false
-				results += "b = append(b, " + fmt.Sprintf("%#v", []byte(format[start:i])) + "...)\n"
-			}
-
-			// peek
-			// two digit day required?
-			if len(format) != i+1 && format[i+1] == 'd' {
-				i++
-				results += `
-
-					if t.Day() < 10 {
-						b = append(b, '0')
-					}
-
-				`
-			}
-
-			results += "b = strconv.AppendInt(b, int64(t.Day()), 10)\n"
-
-		// month
-		case 'M':
-
-			if inConstantText {
-				inConstantText = false
-				results += "b = append(b, " + fmt.Sprintf("%#v", []byte(format[start:i])) + "...)\n"
-			}
-
-			var count int
-
-			// count # of M's
-			for j := i; j < len(format); j++ {
-				if format[j] == 'M' {
-					count++
-				} else {
-					break
-				}
-			}
-
-			switch count {
-
-			// Numeric form, at least 1 digit
-			case 1:
-
-				results += "b = strconv.AppendInt(b, int64(t.Month()), 10)\n"
-
-			// Number form, at least 2 digits (padding with 0)
-			case 2:
-
-				results += `
-
-				if t.Month() < 10 {
-					b = append(b, '0')
-				}
-
-				b = strconv.AppendInt(b, int64(t.Month()), 10)
-
-				`
-
-			// Abbreviated form
-			case 3:
-
-				results += "b = append(b, " + baseLocale + ".monthsAbbreviated[t.Month()]...)\n"
-
-			// Full/Wide form
-			case 4:
-
-				results += "b = append(b, " + baseLocale + ".monthsWide[t.Month()]...)\n"
-
-			// Narrow form - only used in where context makes it clear, such as headers in a calendar.
-			// Should be one character wherever possible.
-			case 5:
-
-				results += "b = append(b, " + baseLocale + ".monthsNarrow[t.Month()]...)\n"
-			}
-
-			// skip over M's
-			i += count - 1
-
-		// year
-		case 'y':
-
-			if inConstantText {
-				inConstantText = false
-				results += "b = append(b, " + fmt.Sprintf("%#v", []byte(format[start:i])) + "...)\n"
-			}
-
-			// peek
-			// two digit year
-			if len(format) != i+1 && format[i+1] == 'y' {
-				i++
-				results += `
-
-					if t.Year() > 9 {
-						b = append(b, strconv.Itoa(t.Year())[2:]...)
-					} else {
-						b = append(b, strconv.Itoa(t.Year())[1:]...)
-					}
-
-				`
-			} else {
-				// four digit year
-				results += `
-
-					if t.Year() > 0 {
-						b = strconv.AppendInt(b, int64(t.Year()), 10)
-					} else {
-						b = strconv.AppendInt(b, int64(-t.Year()), 10)
-					}
-
-				`
-			}
-
-		// weekday
-		// I know I only see 'EEEE' in the xml, but just in case handled all posibilities
-		case 'E':
-
-			if inConstantText {
-				inConstantText = false
-				results += "b = append(b, " + fmt.Sprintf("%#v", []byte(format[start:i])) + "...)\n"
-			}
-
-			var count int
-
-			// count # of E's
-			for j := i; j < len(format); j++ {
-				if format[j] == 'E' {
-					count++
-				} else {
-					break
-				}
-			}
-
-			switch count {
-
-			// Narrow
-			case 1:
-
-				results += "b = append(b, " + baseLocale + ".daysNarrow[t.Weekday()]...)\n"
-
-			// Short
-			case 2:
-
-				results += "b = append(b, " + baseLocale + ".daysShort[t.Weekday()]...)\n"
-
-			// Abbreviated
-			case 3:
-
-				results += "b = append(b, " + baseLocale + ".daysAbbreviated[t.Weekday()]...)\n"
-
-			// Full/Wide
-			case 4:
-
-				results += "b = append(b, " + baseLocale + ".daysWide[t.Weekday()]...)\n"
-			}
-
-			// skip over E's
-			i += count - 1
-
-		// era eg. AD, BC
-		case 'G':
-
-			if inConstantText {
-				inConstantText = false
-				results += "b = append(b, " + fmt.Sprintf("%#v", []byte(format[start:i])) + "...)\n"
-			}
-
-			switch eraScore {
-			case 0:
-				results += `
-
-				if t.Year() < 0 {
-					b = append(b, ` + baseLocale + `.erasWide[0]...)
-				} else {
-					b = append(b, ` + baseLocale + `.erasWide[1]...)
-				}
-
-			`
-			case 1, 2:
-				results += `
-
-				if t.Year() < 0 {
-					b = append(b, ` + baseLocale + `.erasAbbreviated[0]...)
-				} else {
-					b = append(b, ` + baseLocale + `.erasAbbreviated[1]...)
-				}
-
-			`
-			}
-
-		default:
-			// append all non matched text as they are constants
-			if !inConstantText {
-				inConstantText = true
-				start = i
-			}
-		}
-	}
-
-	// if we were inConstantText when the string ended, add what's left.
-	if inConstantText {
-		// inContantText = false
-		results += "b = append(b, " + fmt.Sprintf("%#v", []byte(format[start:])) + "...)\n"
-	}
-
-	return
+	return fmt.Sprintf("locales.FormatTimeEra(%s, %[1]s.%s, t, %d)", baseLocale, format, eraScore)
 }
 
 func parseCurrencyNumberFormat(trans *translator) {
-
-	if len(trans.CurrencyNumberFormat) == 0 {
-		return
+	if trans.currencyFormatters != nil {
+		var buf bytes.Buffer
+		buf.WriteString("&")
+		trans.currencyFormatters.Dump("locales.", &buf)
+		trans.CurrencyFormatters = buf.String()
+	} else {
+		trans.CurrencyFormatters = "nil"
 	}
-
-	trans.FmtCurrencyExists = true
-	negativeEqual := trans.CurrencyNumberFormat == trans.NegativeCurrencyNumberFormat
-
-	match := groupLenRegex.FindString(trans.CurrencyNumberFormat)
-	if len(match) > 0 {
-		trans.FmtCurrencyGroupLen = len(match) - 2
-	}
-
-	match = requiredDecimalRegex.FindString(trans.CurrencyNumberFormat)
-	if len(match) > 0 {
-		trans.FmtCurrencyMinDecimalLen = len(match) - 1
-	}
-
-	match = secondaryGroupLenRegex.FindString(trans.CurrencyNumberFormat)
-	if len(match) > 0 {
-		trans.FmtCurrencySecondaryGroupLen = len(match) - 2
-	}
-
-	idx := 0
-
-	for idx = 0; idx < len(trans.CurrencyNumberFormat); idx++ {
-		if trans.CurrencyNumberFormat[idx] == '#' || trans.CurrencyNumberFormat[idx] == '0' {
-			trans.FmtCurrencyPrefix = trans.CurrencyNumberFormat[:idx]
-			break
-		}
-	}
-
-	for idx = len(trans.CurrencyNumberFormat) - 1; idx >= 0; idx-- {
-		if trans.CurrencyNumberFormat[idx] == '#' || trans.CurrencyNumberFormat[idx] == '0' {
-			idx++
-			trans.FmtCurrencySuffix = trans.CurrencyNumberFormat[idx:]
-			break
-		}
-	}
-
-	for idx = 0; idx < len(trans.FmtCurrencyPrefix); idx++ {
-		if trans.FmtCurrencyPrefix[idx] == '¤' {
-
-			trans.FmtCurrencyInPrefix = true
-			trans.FmtCurrencyPrefix = strings.Replace(trans.FmtCurrencyPrefix, string(trans.FmtCurrencyPrefix[idx]), "", 1)
-
-			if idx == 0 {
-				trans.FmtCurrencyLeft = true
-			} else {
-				trans.FmtCurrencyLeft = false
-			}
-
-			break
-		}
-	}
-
-	for idx = 0; idx < len(trans.FmtCurrencySuffix); idx++ {
-		if trans.FmtCurrencySuffix[idx] == '¤' {
-
-			trans.FmtCurrencyInPrefix = false
-			trans.FmtCurrencySuffix = strings.Replace(trans.FmtCurrencySuffix, string(trans.FmtCurrencySuffix[idx]), "", 1)
-
-			if idx == 0 {
-				trans.FmtCurrencyLeft = true
-			} else {
-				trans.FmtCurrencyLeft = false
-			}
-
-			break
-		}
-	}
-
-	// if len(trans.FmtCurrencyPrefix) > 0 {
-	// 	trans.FmtCurrencyPrefix = fmt.Sprintf("%#v", []byte(trans.FmtCurrencyPrefix))
-	// }
-
-	// if len(trans.FmtCurrencySuffix) > 0 {
-	// 	trans.FmtCurrencySuffix = fmt.Sprintf("%#v", []byte(trans.FmtCurrencySuffix))
-	// }
-
-	// no need to parse again if true....
-	if negativeEqual {
-
-		trans.FmtCurrencyNegativePrefix = trans.FmtCurrencyPrefix
-		trans.FmtCurrencyNegativeSuffix = trans.FmtCurrencySuffix
-		trans.FmtCurrencyNegativeInPrefix = trans.FmtCurrencyInPrefix
-		trans.FmtCurrencyNegativeLeft = trans.FmtCurrencyLeft
-
-		return
-	}
-
-	trans.FmtCurrencyNegativeExists = true
-
-	for idx = 0; idx < len(trans.NegativeCurrencyNumberFormat); idx++ {
-		if trans.NegativeCurrencyNumberFormat[idx] == '#' || trans.NegativeCurrencyNumberFormat[idx] == '0' {
-
-			trans.FmtCurrencyNegativePrefix = trans.NegativeCurrencyNumberFormat[:idx]
-			break
-		}
-	}
-
-	for idx = len(trans.NegativeCurrencyNumberFormat) - 1; idx >= 0; idx-- {
-		if trans.NegativeCurrencyNumberFormat[idx] == '#' || trans.NegativeCurrencyNumberFormat[idx] == '0' {
-			idx++
-			trans.FmtCurrencyNegativeSuffix = trans.NegativeCurrencyNumberFormat[idx:]
-			break
-		}
-	}
-
-	for idx = 0; idx < len(trans.FmtCurrencyNegativePrefix); idx++ {
-		if trans.FmtCurrencyNegativePrefix[idx] == '¤' {
-
-			trans.FmtCurrencyNegativeInPrefix = true
-			trans.FmtCurrencyNegativePrefix = strings.Replace(trans.FmtCurrencyNegativePrefix, string(trans.FmtCurrencyNegativePrefix[idx]), "", 1)
-
-			if idx == 0 {
-				trans.FmtCurrencyNegativeLeft = true
-			} else {
-				trans.FmtCurrencyNegativeLeft = false
-			}
-
-			break
-		}
-	}
-
-	for idx = 0; idx < len(trans.FmtCurrencyNegativeSuffix); idx++ {
-		if trans.FmtCurrencyNegativeSuffix[idx] == '¤' {
-
-			trans.FmtCurrencyNegativeInPrefix = false
-			trans.FmtCurrencyNegativeSuffix = strings.Replace(trans.FmtCurrencyNegativeSuffix, string(trans.FmtCurrencyNegativeSuffix[idx]), "", 1)
-
-			if idx == 0 {
-				trans.FmtCurrencyNegativeLeft = true
-			} else {
-				trans.FmtCurrencyNegativeLeft = false
-			}
-
-			break
-		}
-	}
-
-	// if len(trans.FmtCurrencyNegativePrefix) > 0 {
-	// 	trans.FmtCurrencyNegativePrefix = fmt.Sprintf("%#v", []byte(trans.FmtCurrencyNegativePrefix))
-	// }
-
-	// if len(trans.FmtCurrencyNegativeSuffix) > 0 {
-	// 	trans.FmtCurrencyNegativeSuffix = fmt.Sprintf("%#v", []byte(trans.FmtCurrencyNegativeSuffix))
-	// }
-
-	return
 }
 
 func parsePercentNumberFormat(trans *translator) {
@@ -2421,6 +2116,11 @@ func parseOrdinalPluralRuleFunc(current *cldr.CLDR, baseLocale string) (results 
 				Value: prVarFuncs["t"],
 				Rank:  5,
 			})
+		case "e", "c":
+			sorted = append(sorted, sortRank{
+				Value: prVarFuncs[k[:1]],
+				Rank:  6,
+			})
 		}
 	}
 
@@ -2548,6 +2248,14 @@ FIND:
 
 		if strings.Contains(data, "t") {
 			vals[prVarFuncs["t"]] = struct{}{}
+		}
+
+		if strings.Contains(data, "e") {
+			vals[prVarFuncs["e"]] = struct{}{}
+		}
+
+		if strings.Contains(data, "c") {
+			vals[prVarFuncs["c"]] = struct{}{}
 		}
 
 		if first {
@@ -2710,6 +2418,11 @@ FIND:
 			sorted = append(sorted, sortRank{
 				Value: prVarFuncs["t"],
 				Rank:  5,
+			})
+		case "e", "c":
+			sorted = append(sorted, sortRank{
+				Value: prVarFuncs["e"],
+				Rank:  6,
 			})
 		}
 	}

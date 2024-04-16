@@ -2,7 +2,11 @@
 package currency
 
 // Type is the currency type associated with the locales currency enum
-type Type int
+type Type uint16
+
+func (t Type) Index() int {
+    return int(t)-1
+}
 
 // locale currencies
 const (

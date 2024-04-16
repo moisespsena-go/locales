@@ -2,9 +2,6 @@ package locales
 
 import (
 	"strconv"
-	"time"
-
-	"github.com/go-playground/locales/currency"
 )
 
 // // ErrBadNumberValue is returned when the number passed for
@@ -42,117 +39,48 @@ const (
 // Translator encapsulates an instance of a locale
 // NOTE: some values are returned as a []byte just in case the caller
 // wishes to add more and can help avoid allocations; otherwise just cast as string
-type Translator interface {
+type (
+	Translator interface {
 
-	// The following Functions are for overriding, debugging or developing
-	// with a Translator Locale
+		// The following Functions are for overriding, debugging or developing
+		// with a Translator Locale
 
-	// Locale returns the string value of the translator
-	Locale() string
+		// Locale returns the string value of the translator
+		Locale() string
 
-	// returns an array of cardinal plural rules associated
-	// with this translator
-	PluralsCardinal() []PluralRule
+		// returns an array of cardinal plural rules associated
+		// with this translator
+		PluralsCardinal() []PluralRule
 
-	// returns an array of ordinal plural rules associated
-	// with this translator
-	PluralsOrdinal() []PluralRule
+		// returns an array of ordinal plural rules associated
+		// with this translator
+		PluralsOrdinal() []PluralRule
 
-	// returns an array of range plural rules associated
-	// with this translator
-	PluralsRange() []PluralRule
+		// returns an array of range plural rules associated
+		// with this translator
+		PluralsRange() []PluralRule
 
-	// returns the cardinal PluralRule given 'num' and digits/precision of 'v' for locale
-	CardinalPluralRule(num float64, v uint64) PluralRule
+		// returns the cardinal PluralRule given 'num' and digits/precision of 'v' for locale
+		CardinalPluralRule(num float64, v uint64) PluralRule
 
-	// returns the ordinal PluralRule given 'num' and digits/precision of 'v' for locale
-	OrdinalPluralRule(num float64, v uint64) PluralRule
+		// returns the ordinal PluralRule given 'num' and digits/precision of 'v' for locale
+		OrdinalPluralRule(num float64, v uint64) PluralRule
 
-	// returns the ordinal PluralRule given 'num1', 'num2' and digits/precision of 'v1' and 'v2' for locale
-	RangePluralRule(num1 float64, v1 uint64, num2 float64, v2 uint64) PluralRule
+		// returns the ordinal PluralRule given 'num1', 'num2' and digits/precision of 'v1' and 'v2' for locale
+		RangePluralRule(num1 float64, v1 uint64, num2 float64, v2 uint64) PluralRule
 
-	// returns the locales abbreviated month given the 'month' provided
-	MonthAbbreviated(month time.Month) string
+		// The following Functions are common Formatting functionsfor the Translator's Locale
 
-	// returns the locales abbreviated months
-	MonthsAbbreviated() []string
+		ListPatterns() *ListPatterns
 
-	// returns the locales narrow month given the 'month' provided
-	MonthNarrow(month time.Month) string
+		GetMiscPatterns() *MiscPatterns
 
-	// returns the locales narrow months
-	MonthsNarrow() []string
-
-	// returns the locales wide month given the 'month' provided
-	MonthWide(month time.Month) string
-
-	// returns the locales wide months
-	MonthsWide() []string
-
-	// returns the locales abbreviated weekday given the 'weekday' provided
-	WeekdayAbbreviated(weekday time.Weekday) string
-
-	// returns the locales abbreviated weekdays
-	WeekdaysAbbreviated() []string
-
-	// returns the locales narrow weekday given the 'weekday' provided
-	WeekdayNarrow(weekday time.Weekday) string
-
-	// WeekdaysNarrowreturns the locales narrow weekdays
-	WeekdaysNarrow() []string
-
-	// returns the locales short weekday given the 'weekday' provided
-	WeekdayShort(weekday time.Weekday) string
-
-	// returns the locales short weekdays
-	WeekdaysShort() []string
-
-	// returns the locales wide weekday given the 'weekday' provided
-	WeekdayWide(weekday time.Weekday) string
-
-	// returns the locales wide weekdays
-	WeekdaysWide() []string
-
-	// The following Functions are common Formatting functionsfor the Translator's Locale
-
-	// returns 'num' with digits/precision of 'v' for locale and handles both Whole and Real numbers based on 'v'
-	FmtNumber(num float64, v uint64) string
-
-	// returns 'num' with digits/precision of 'v' for locale and handles both Whole and Real numbers based on 'v'
-	// NOTE: 'num' passed into FmtPercent is assumed to be in percent already
-	FmtPercent(num float64, v uint64) string
-
-	// returns the currency representation of 'num' with digits/precision of 'v' for locale
-	FmtCurrency(num float64, v uint64, currency currency.Type) string
-
-	// returns the currency representation of 'num' with digits/precision of 'v' for locale
-	// in accounting notation.
-	FmtAccounting(num float64, v uint64, currency currency.Type) string
-
-	// returns the short date representation of 't' for locale
-	FmtDateShort(t time.Time) string
-
-	// returns the medium date representation of 't' for locale
-	FmtDateMedium(t time.Time) string
-
-	//  returns the long date representation of 't' for locale
-	FmtDateLong(t time.Time) string
-
-	// returns the full date representation of 't' for locale
-	FmtDateFull(t time.Time) string
-
-	// returns the short time representation of 't' for locale
-	FmtTimeShort(t time.Time) string
-
-	// returns the medium time representation of 't' for locale
-	FmtTimeMedium(t time.Time) string
-
-	// returns the long time representation of 't' for locale
-	FmtTimeLong(t time.Time) string
-
-	// returns the full time representation of 't' for locale
-	FmtTimeFull(t time.Time) string
-}
+		NumberTranslator
+		CurrencyTranslator
+		TimeTranslator
+		DurationTranslator
+	}
+)
 
 // String returns the string value  of PluralRule
 func (p PluralRule) String() string {
@@ -177,6 +105,7 @@ func (p PluralRule) String() string {
 
 //
 // Precision Notes:
+// Specs: http://unicode.org/reports/tr35/tr35-numbers.html#Operands
 //
 // must specify a precision >= 0, and here is why https://play.golang.org/p/LyL90U0Vyh
 //
@@ -290,4 +219,14 @@ func T(n float64, v uint64) (t int64) {
 	}
 
 	return
+}
+
+type CurrencySymbols struct {
+	Default string
+	Narrow  string
+}
+
+type Currency struct {
+	Names   map[PluralRule]string
+	Symbols CurrencySymbols
 }

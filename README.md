@@ -1,13 +1,13 @@
 ## locales
 <img align="right" src="https://raw.githubusercontent.com/go-playground/locales/master/logo.png">![Project status](https://img.shields.io/badge/version-0.14.0-green.svg)
 [![Build Status](https://travis-ci.org/go-playground/locales.svg?branch=master)](https://travis-ci.org/go-playground/locales)
-[![Go Report Card](https://goreportcard.com/badge/github.com/go-playground/locales)](https://goreportcard.com/report/github.com/go-playground/locales)
-[![GoDoc](https://godoc.org/github.com/go-playground/locales?status.svg)](https://godoc.org/github.com/go-playground/locales)
+[![Go Report Card](https://goreportcard.com/badge/github.com/moisespsena-go/locales)](https://goreportcard.com/report/github.com/moisespsena-go/locales)
+[![GoDoc](https://godoc.org/github.com/moisespsena-go/locales?status.svg)](https://godoc.org/github.com/moisespsena-go/locales)
 ![License](https://img.shields.io/dub/l/vibe-d.svg)
 [![Gitter](https://badges.gitter.im/go-playground/locales.svg)](https://gitter.im/go-playground/locales?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
 
 Locales is a set of locales generated from the [Unicode CLDR Project](http://cldr.unicode.org/) which can be used independently or within
-an i18n package; these were built for use with, but not exclusive to, [Universal Translator](https://github.com/go-playground/universal-translator).
+an i18n package; these were built for use with, but not exclusive to, [Universal Translator](https://github.com/moisespsena-go/universal-translator).
 
 Features
 --------
@@ -21,7 +21,7 @@ Features
 Full Tests
 --------------------
 I could sure use your help adding tests for every locale, it is a huge undertaking and I just don't have the free time to do it all at the moment;
-any help would be **greatly appreciated!!!!** please see [issue](https://github.com/go-playground/locales/issues/1) for details.
+any help would be **greatly appreciated!!!!** please see [issue](https://github.com/moisespsena-go/locales/issues/1) for details.
 
 Installation
 -----------
@@ -29,7 +29,7 @@ Installation
 Use go get 
 
 ```shell
-go get github.com/go-playground/locales
+go get github.com/moisespsena-go/locales
 ```  
 
 NOTES
@@ -46,8 +46,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-playground/locales/currency"
-	"github.com/go-playground/locales/en_CA"
+	"github.com/moisespsena-go/locales/currency"
+	"github.com/moisespsena-go/locales/en_CA"
 )
 
 func main() {
